@@ -20,6 +20,10 @@ jobs:
           test "$(uname -m)" = x86_64
           shasum -a 256 -c SHA256SUMS
           bash -n core/claude-switch.sh soft-router/安装.command scripts/package-macos.sh
+      - name: Focused account and router tests
+        run: |
+          python3 -B -m unittest discover -s tests -p test_multi_account.py -v
+          python3 -B -m unittest discover -s tests -p test_soft_router.py -v
       - name: Regression suite
         run: python3 -B -m unittest discover -s tests -v
       - name: Build app and special installer

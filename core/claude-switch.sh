@@ -2530,7 +2530,7 @@ restore_keep_paths() {
 switch_to() {
     target="${1:-}"
     valid_account "$target" || return 1
-    if [ "$PROXY_MODE" = "router" ]; then check || return 1; fi
+    if [ "${PROXY_MODE:-}" = "router" ]; then check || return 1; fi
     cur="none"; [ -f "$BASE/current" ] && cur=$(cat "$BASE/current")
     just_archived=0
 
