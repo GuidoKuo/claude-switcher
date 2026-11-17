@@ -992,7 +992,7 @@ router_ready() {
 router_preflight() {
     router_ready || return 1
     router_ipv6_no_default || { echo 'IPv6 存在默认路由或状态未知；已停止外网检测' >&2; return 1; }
-    route_ok || { echo 'Claude 域名未解析到预期 fake-IP；不能确认路由器接管' >&2; return 1; }
+    route_ok || { echo "以下域名未解析到 198.18.x.x：${ROUTE_MISSED}；不能确认路由器接管" >&2; return 1; }
 }
 router_ipv6_no_default() {
     local routes

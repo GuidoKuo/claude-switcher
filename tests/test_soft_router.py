@@ -1,6 +1,8 @@
 """Synthetic network tests. No real network, root daemon or account data used."""
 import os
 import re
+import platform
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -48,6 +50,18 @@ esac''',
         for path in (ROOT/'core/claude-switch.sh', ROOT/'soft-router/安装.command'):
             text=path.read_text(encoding='utf-8')
             self.assertIsNone(re.search(r'\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]', text), str(path))
+
+    @unittest.skipUnless(platform.system() == "Darwin" and shutil.which("swiftc"), "requires SwiftUI on macOS")
+    def test_swift_model_executes_real_router_core(self):
+        binary = self.root / "router-model"
+        compile_result = subprocess.run(["swiftc", "-parse-as-library", "-D", "CLAUDE_SWITCHER_TESTS",
+            "-target", f"{platform.machine()}-apple-macos13.0", str(ROOT/"app/main.swift"),
+            str(ROOT/"tests/RouterRealModel.swift"), "-o", str(binary), "-framework", "SwiftUI", "-framework", "AppKit"], capture_output=True, text=True, timeout=180)
+        self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+        for mode, env in (("ready", {}), ("blocked", {"MOCK_GATEWAY": "94.83.87.1"})):
+            p = subprocess.run([str(binary), str(self.core), mode], env={**self.env, **env}, capture_output=True, text=True, timeout=30)
+            self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
+            self.assertIn("PASS real core model", p.stdout)
 
     def test_ready_displays_limits_without_local_tun_or_daemon(self):
         p=self.run_core(['checkdetail'])

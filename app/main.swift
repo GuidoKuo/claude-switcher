@@ -295,7 +295,7 @@ final class VM: ObservableObject {
                 self.banner = result.output.isEmpty ? "核心脚本执行失败" : result.output
                 for i in self.rows.indices where self.rows[i].state == .pending {
                     self.rows[i].state = .fail
-                    self.rows[i].detail = "核心脚本执行失败"
+                    self.rows[i].detail = "未检查：请查看上方具体原因"
                 }
             } else if duplicated {
                 self.banner = "检测输出存在重复项，请重新检查"
@@ -314,7 +314,7 @@ final class VM: ObservableObject {
                     let statusOK = self.updateStatus(status)
                     if !statusOK {
                         if !passed || self.banner.isEmpty {
-                            self.banner = "无法读取账号状态，请重新检查"
+                            self.banner = self.banner.isEmpty ? "无法读取账号状态，请重新检查" : self.banner + "\n另外，无法读取账号状态"
                         }
                         self.lastCheckSummary = "失败"
                     }

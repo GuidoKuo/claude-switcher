@@ -292,6 +292,15 @@ struct MenuBarModelTests {
             case "empty_check_code":
                 try f.audit(["TUN网卡": ""])
                 try f.deniedSwitch(f.vm())
+            case "router_preflight_explanation":
+                try f.write("audit", "网关或接口与安装时不同，已阻止切换\n")
+                try f.write("check-exit", "1")
+                let vm = f.vm()
+                vm.start()
+                try f.idle(vm)
+                try expect(vm.banner.contains("网关或接口"), "前置失败必须显示具体原因")
+                try expect(vm.rows.allSatisfy { $0.detail.contains("请查看上方具体原因") }, "未检测项必须指向原因")
+                try f.deniedSwitch(vm)
             case "nonzero_check":
                 try f.write("check-exit", "7")
                 try f.deniedSwitch(f.vm())
