@@ -12,5 +12,6 @@ shasum -a 256 \
     installer/install-app.sh \
     installer/安装.command \
     installer/卸载.command \
+    soft-router/安装.command \
     linux/*.sh linux/*.py linux/monitor.css linux/claude-switcher-shield-symbolic.svg > SHA256SUMS
 echo "✓ SHA256SUMS 已更新"

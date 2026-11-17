@@ -114,6 +114,7 @@ final class VM: ObservableObject {
     ]
 
     static let clientChoices: [(key: String, label: String)] = [
+        ("router", "软路由（无断网保护）"),
         ("clash-verge", "Clash Verge"),
         ("flclash", "FlClash"),
         ("bettbox", "Bettbox"),
@@ -135,7 +136,7 @@ final class VM: ObservableObject {
     var onSwitchCompleted: (() -> Void)?
 
     init(core: String = NSHomeDirectory() + "/.local/bin/claude-switch.sh",
-         checkTimeout: TimeInterval = 45, operationTimeout: TimeInterval = 180,
+         checkTimeout: TimeInterval = 90, operationTimeout: TimeInterval = 180,
          noticeDefaults: UserDefaults = .standard) {
         self.core = core
         self.checkTimeout = checkTimeout
@@ -896,7 +897,7 @@ struct ContentView: View {
             }
             .labelsHidden()
             .frame(width: 150)
-            .disabled(vm.isBusy || vm.isSwitchingClient)
+            .disabled(vm.isBusy || vm.isSwitchingClient || vm.currentClient == "router")
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 12)

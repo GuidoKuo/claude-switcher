@@ -973,6 +973,35 @@ log_result() {
 # TUN 在线判定:存在 fake-ip 网段地址即视为 TUN 已接管(兼容各种 TUN 设备名)
 tun_up() { ifconfig 2>/dev/null | grep -q 'inet 198\.18\.'; }
 
+# 软路由模式仅验证本机网络基线，不能保证断线防泄漏。
+router_ready() {
+    local cfg="$BASE/router-network" expected_gw expected_if expected_ip route_info gw iface ip
+    if launchctl print system/local.claude-bodyguard >/dev/null 2>&1 || [ -e /Library/LaunchDaemons/local.claude-bodyguard.plist ]; then
+        echo '检测到旧版保镖，可能误关 Claude；请先安全卸载旧版保护' >&2; return 1
+    fi
+    [ -r "$cfg" ] || { echo '未设置软路由网络基线，请重新运行专用安装器' >&2; return 1; }
+    expected_gw=$(sed -n '1p' "$cfg"); expected_if=$(sed -n '2p' "$cfg"); expected_ip=$(sed -n '3p' "$cfg")
+    [ -n "$expected_gw" ] && [ -n "$expected_if" ] && [ -n "$expected_ip" ] || { echo '网络基线不完整' >&2; return 1; }
+    route_info=$(route -n get default 2>/dev/null) || { echo '无法读取默认路由' >&2; return 1; }
+    gw=$(printf '%s\n' "$route_info" | awk '$1=="gateway:" {print $2; exit}')
+    iface=$(printf '%s\n' "$route_info" | awk '$1=="interface:" {print $2; exit}')
+    [ "$gw" = "$expected_gw" ] && [ "$iface" = "$expected_if" ] || { echo '网关或接口与安装时不同，已阻止切换' >&2; return 1; }
+    ip=$(ipconfig getifaddr "$iface" 2>/dev/null) || { echo '无法获取接口 IPv4 地址' >&2; return 1; }
+    [ "$ip" = "$expected_ip" ] || { echo '本机 IPv4 地址已变化，设备分流规则可能不再匹配' >&2; return 1; }
+}
+router_preflight() {
+    router_ready || return 1
+    router_ipv6_no_default || { echo 'IPv6 存在默认路由或状态未知；已停止外网检测' >&2; return 1; }
+    route_ok || { echo 'Claude 域名未解析到预期 fake-IP；不能确认路由器接管' >&2; return 1; }
+}
+router_ipv6_no_default() {
+    local routes
+    routes=$(netstat -rn -f inet6 2>/dev/null) || return 1
+    [ -n "$routes" ] || return 1
+    ! printf '%s\n' "$routes" | awk '$1=="default" || $1=="::/0" {found=1} END {exit !found}'
+}
+
+
 # 代理客户端显示名(供检查细节输出)
 proxy_name() {
     case "$PROXY_MODE" in
@@ -1215,13 +1244,21 @@ check() {
     load_check_config || { echo "FAIL:检查配置无效，请恢复默认设置"; return 1; }
     fails=""
 
-    proxy_alive || fails="$fails;代理内核未运行"
-    tun_up || fails="$fails;TUN网卡不在线"
+    if [ "$PROXY_MODE" = "router" ]; then
+        router_preflight || { echo 'FAIL:软路由网络基线或 fake-IP 检查失败'; return 1; }
+    else
+        proxy_alive || fails="$fails;代理内核未运行"
+        tun_up || fails="$fails;TUN网卡不在线"
+    fi
 
-    trace=$(curl -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+    if [ "$PROXY_MODE" = "router" ]; then
+        trace=$(curl -4 --noproxy "*" -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+    else
+        trace=$(curl -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+    fi
     ip=$(echo "$trace" | grep '^ip=' | cut -d= -f2)
     loc=$(echo "$trace" | grep '^loc=' | cut -d= -f2)
-    [ "$loc" = "$COUNTRY_TARGET" ] || fails="$fails;出口IP异常(${ip:-无}/${loc:-未知},期望$COUNTRY_TARGET)"
+    [ -n "$ip" ] && [ "$loc" = "$COUNTRY_TARGET" ] || fails="$fails;出口IP异常(${ip:-无}/${loc:-未知},期望$COUNTRY_TARGET)"
     ipwarn=""
     if ! check_disabled "IP一致"; then
         lastip=""; [ -f "$BASE/lastip" ] && lastip=$(cat "$BASE/lastip")
@@ -1238,13 +1275,17 @@ check() {
     fi
 
     tz=$(readlink /etc/localtime 2>/dev/null)
-    [ "$tz" = "/var/db/timezone/zoneinfo/$TZ_TARGET" ] || fails="$fails;时区异常($tz)"
+    [ "$PROXY_MODE" = "router" ] || [ "$tz" = "/var/db/timezone/zoneinfo/$TZ_TARGET" ] || fails="$fails;时区异常($tz)"
 
     locale=$(defaults read -g AppleLocale 2>/dev/null)
-    [ "$locale" = "$LOCALE_TARGET" ] || fails="$fails;地区异常($locale)"
+    [ "$PROXY_MODE" = "router" ] || [ "$locale" = "$LOCALE_TARGET" ] || fails="$fails;地区异常($locale)"
 
-    v6=$(networksetup -getinfo Wi-Fi 2>/dev/null | grep -i '^IPv6:')
-    echo "$v6" | grep -qi 'off' || fails="$fails;IPv6未关闭"
+    if [ "$PROXY_MODE" = "router" ]; then
+        router_ipv6_no_default || fails="$fails;IPv6存在默认路由或状态无法确认"
+    else
+        v6=$(networksetup -getinfo Wi-Fi 2>/dev/null | grep -i '^IPv6:')
+        echo "$v6" | grep -qi 'off' || fails="$fails;IPv6未关闭"
+    fi
 
     if ! check_disabled "DNS"; then
         dnsip=$(dig +short +time=3 +tries=1 claude.ai 2>/dev/null | head -1)
@@ -1259,15 +1300,19 @@ check() {
         case "$wr" in fail:*) optional_failure "WebRTC:${wr#fail:}" ;; esac
     fi
 
-    guard_state=$(bodyguard_status)
-    case "$guard_state" in
-        ok:*) ;;
-        fail:*) fails="$fails;保镖:${guard_state#fail:}" ;;
-        *) fails="$fails;保镖:状态无法验证" ;;
-    esac
+    if [ "$PROXY_MODE" != "router" ]; then
+        guard_state=$(bodyguard_status)
+        case "$guard_state" in
+            ok:*) ;;
+            fail:*) fails="$fails;保镖:${guard_state#fail:}" ;;
+            *) fails="$fails;保镖:状态无法验证" ;;
+        esac
+    fi
 
     # 置顶规则:Clash Verge 验证运行内核;全局模式下全部流量走代理,规则不适用;其他客户端只看行为检测
-    if [ "$PROXY_MODE" = "clash-verge" ]; then
+    if [ "$PROXY_MODE" = "router" ]; then
+        : # fake-IP 不证明实际规则、节点或防泄漏
+    elif [ "$PROXY_MODE" = "clash-verge" ]; then
         [ "$(clash_mode)" = "global" ] || merge_ok || fails="$fails;运行中置顶规则未验证"
     else
         route_ok || fails="$fails;置顶规则缺失(未命中:${ROUTE_MISSED# })"
@@ -1276,7 +1321,7 @@ check() {
     if ! check_disabled "客户端语言"; then
         defaults read com.anthropic.claudefordesktop AppleLanguages 2>/dev/null | grep -q 'en-US' || {
             syslang=$(defaults read -g AppleLanguages 2>/dev/null | sed -n '2p' | tr -d ' ,"')
-            [[ "$syslang" == en* ]] || optional_failure "客户端语言为中文"
+            [ "$PROXY_MODE" = "router" ] || [[ "$syslang" == en* ]] || optional_failure "客户端语言为中文"
         }
     fi
 
@@ -1301,6 +1346,7 @@ webrtc_test() {
 
 # 日常检查与修复共用此判断。先确认规则，再允许探测，避免向已知直连路径发包。
 webrtc_status() {
+    if [ "$PROXY_MODE" = "router" ]; then echo "warn:未探测；UDP/WebRTC 出口未验证"; return; fi
     local verified result probe_rc assessment mode leak wips w
     if [ "$PROXY_MODE" = "clash-verge" ]; then
         mode=$(clash_mode)
@@ -1385,7 +1431,11 @@ bodyguard_status() {
 # 逐项输出检查结果(供UI使用): 名称=ok|fail:细节
 checkdetail() {
     load_check_config || { echo "检查配置无效，请恢复默认设置"; return 1; }
-    if proxy_alive; then
+    if [ "$PROXY_MODE" = "router" ]; then
+        router_preflight || { echo '软路由网络基线或 fake-IP 检查失败；未继续外网检测'; return 1; }
+        echo '代理内核=warn:软路由模式；路由器内核未验证'
+        echo 'TUN网卡=skip:TUN 位于路由器，本机不检查'
+    elif proxy_alive; then
         case "$PROXY_MODE" in
             shadowrocket) echo '代理内核=ok:Shadowrocket 已连接' ;;
             *) echo "代理内核=ok:$(proxy_name) 运行中" ;;
@@ -1393,11 +1443,17 @@ checkdetail() {
     else
         echo "代理内核=fail:$(proxy_name) 未运行"
     fi
-    if tun_up; then echo 'TUN网卡=ok'; else echo 'TUN网卡=fail:不在线'; fi
-    trace=$(curl -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+    if [ "$PROXY_MODE" != "router" ]; then
+        if tun_up; then echo 'TUN网卡=ok'; else echo 'TUN网卡=fail:不在线'; fi
+    fi
+    if [ "$PROXY_MODE" = "router" ]; then
+        trace=$(curl -4 --noproxy "*" -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+    else
+        trace=$(curl -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+    fi
     ip=$(echo "$trace" | grep '^ip=' | cut -d= -f2)
     loc=$(echo "$trace" | grep '^loc=' | cut -d= -f2)
-    if [ "$loc" = "$COUNTRY_TARGET" ]; then echo "出口IP=ok:$ip/$loc"; else echo "出口IP=fail:${ip:-无}/${loc:-未知}(期望$COUNTRY_TARGET)"; fi
+    if [ -n "$ip" ] && [ "$loc" = "$COUNTRY_TARGET" ]; then echo "出口IP=ok:$ip/$loc"; else echo "出口IP=fail:${ip:-无}/${loc:-未知}(期望$COUNTRY_TARGET)"; fi
     if check_disabled "IP一致"; then
         optional_result "IP一致" ok
     else
@@ -1420,17 +1476,21 @@ checkdetail() {
         optional_result "IP一致" "$ipst" "$ipdt"
     fi
     tz=$(readlink /etc/localtime 2>/dev/null)
-    if [ "$tz" = "/var/db/timezone/zoneinfo/$TZ_TARGET" ]; then echo '时区=ok'; else echo "时区=fail:$tz"; fi
+    if [ "$PROXY_MODE" = "router" ]; then echo "时区=warn:仅显示当前值 $tz；不自动修改"; elif [ "$tz" = "/var/db/timezone/zoneinfo/$TZ_TARGET" ]; then echo '时区=ok'; else echo "时区=fail:$tz"; fi
     locale=$(defaults read -g AppleLocale 2>/dev/null)
-    if [ "$locale" = "$LOCALE_TARGET" ]; then echo '地区=ok'; else echo "地区=fail:$locale"; fi
-    v6=$(networksetup -getinfo Wi-Fi 2>/dev/null | grep -i '^IPv6:')
-    if echo "$v6" | grep -qi 'off'; then echo 'IPv6=ok:已关闭'; else echo 'IPv6=fail:未关闭'; fi
+    if [ "$PROXY_MODE" = "router" ]; then echo "地区=warn:仅显示当前值 $locale；不自动修改"; elif [ "$locale" = "$LOCALE_TARGET" ]; then echo '地区=ok'; else echo "地区=fail:$locale"; fi
+    if [ "$PROXY_MODE" = "router" ]; then
+        if router_ipv6_no_default; then echo 'IPv6=warn:未发现 IPv6 默认路由；未验证所有路径'; else echo 'IPv6=fail:发现默认路由或无法读取路由表'; fi
+    else
+        v6=$(networksetup -getinfo Wi-Fi 2>/dev/null | grep -i '^IPv6:')
+        if echo "$v6" | grep -qi 'off'; then echo 'IPv6=ok:已关闭'; else echo 'IPv6=fail:未关闭'; fi
+    fi
     if check_disabled "DNS"; then
         optional_result "DNS" ok
     else
         dnsip=$(dig +short +time=3 +tries=1 claude.ai 2>/dev/null | head -1)
         case "$dnsip" in
-            198.18.*) optional_result "DNS" ok "走隧道" ;;
+            198.18.*) if [ "$PROXY_MODE" = "router" ]; then optional_result "DNS" warn "返回 fake-IP；不证明 DNS 或流量防泄漏"; else optional_result "DNS" ok "走隧道"; fi ;;
             *) optional_result "DNS" fail "未走隧道(${dnsip:-空})" ;;
         esac
     fi
@@ -1442,9 +1502,11 @@ checkdetail() {
         case "$wr" in *:*) wrdt=${wr#*:} ;; esac
         optional_result "WebRTC" "$wrst" "$wrdt"
     fi
-    echo "保镖=$(bodyguard_status)"
+    if [ "$PROXY_MODE" = "router" ]; then echo '保镖=warn:未安装；没有故障断网保护'; else echo "保镖=$(bodyguard_status)"; fi
     # 置顶规则:Clash Verge 验证运行内核;全局模式下规则不适用(全部流量已走代理)
-    if [ "$PROXY_MODE" = "clash-verge" ]; then
+    if [ "$PROXY_MODE" = "router" ]; then
+        echo '规则置顶=warn:只检测到 fake-IP；路由器实际规则和出口未验证'
+    elif [ "$PROXY_MODE" = "clash-verge" ]; then
         if [ "$(clash_mode)" = "global" ]; then
             echo '规则置顶=ok:全局模式(全部流量走代理)'
         elif merge_ok; then
@@ -1470,7 +1532,7 @@ checkdetail() {
         elif [[ "$syslang" == en* ]]; then
             optional_result "客户端语言" ok "跟随系统(英文)"
         else
-            optional_result "客户端语言" fail "跟随系统(中文)"
+            if [ "$PROXY_MODE" = "router" ]; then optional_result "客户端语言" warn "当前语言非英文；未修改"; else optional_result "客户端语言" fail "跟随系统(中文)"; fi
         fi
     fi
     # 13. ASN 网络属性(住宅宽带 vs 机房,按目标地区收录主流运营商)
@@ -1566,6 +1628,7 @@ fix_flclash() {
 
 # 一键修复:按项自动修复,每步输出结果
 fix() {
+    if [ "$PROXY_MODE" = "router" ]; then echo "FIX:软路由模式不自动修改系统或路由器；请手动排查并重新检查"; return 1; fi
     if [ "$PROXY_MODE" = "flclash" ]; then
         fix_flclash || return 1
     fi
@@ -1719,6 +1782,7 @@ ASEOF
 
 # 更换代理客户端:改写已安装脚本头部的 PROXY_MODE(用于安装后换客户端/装错客户端)
 set_client() {
+    if [ "$PROXY_MODE" = "router" ]; then echo "FAIL:软路由版不支持在应用内切换模式；请使用对应安装器"; return 1; fi
     mode="${1:-}"
     case "$mode" in
         clash-verge|flclash|bettbox|shadowrocket|sing-box|clashx|surge|auto) ;;
@@ -1754,6 +1818,7 @@ get_client() {
 
 # 地区自适应:按当前出口国家一键重设 国家/时区/地区格式(换了国家节点后运行)
 set_region() {
+    if [ "$PROXY_MODE" = "router" ]; then echo "FAIL:软路由版不自动修改时区或地区"; return 1; fi
     local geo gfile ctry ntz src nlocale rc
     gfile=$(mktemp "${TMPDIR:-/tmp}/claude-geo.XXXXXX" 2>/dev/null) || gfile=""
     GEO_DIAG_FILE="$gfile"
@@ -1832,6 +1897,7 @@ install_staged() {  # $1=源文件 $2=目标文件
 }
 
 self_update() {
+    if [ "$PROXY_MODE" = "router" ]; then echo "FAIL:软路由测试版禁用上游自动更新，请等待适配版更新"; return 1; fi
     auto=0; check=0
     case "${1:-}" in
         --auto) auto=1 ;;
@@ -2046,6 +2112,7 @@ cli_info() {
 }
 
 open_safe() {
+    if [ "$PROXY_MODE" = "router" ]; then echo "FAIL:软路由模式不能保证安全浏览器防泄漏，已禁用"; return 1; fi
     url="${1:-}"
     case "$url" in
         http://*|https://*) ;;
@@ -2463,6 +2530,7 @@ restore_keep_paths() {
 switch_to() {
     target="${1:-}"
     valid_account "$target" || return 1
+    if [ "$PROXY_MODE" = "router" ]; then check || return 1; fi
     cur="none"; [ -f "$BASE/current" ] && cur=$(cat "$BASE/current")
     just_archived=0
 
