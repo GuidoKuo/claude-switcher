@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           bash scripts/package-macos.sh "$VERSION"
           APP='build/Claude切换器.app'
-          lipo -verify_arch x86_64 "$APP/Contents/MacOS/ClaudeSwitcher"
+          lipo "$APP/Contents/MacOS/ClaudeSwitcher" -verify_arch x86_64
           test "$(lipo -archs "$APP/Contents/MacOS/ClaudeSwitcher")" = x86_64
           codesign --verify --deep --strict "$APP"
           test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION"
@@ -47,7 +47,7 @@ jobs:
           WORK="$(mktemp -d)"
           trap 'rm -rf "$WORK"' EXIT
           ditto -x -k "build/ClaudeSwitcher-${VERSION}-macos-x86_64-app-only.zip" "$WORK"
-          lipo -verify_arch x86_64 "$WORK/Claude切换器.app/Contents/MacOS/ClaudeSwitcher"
+          lipo "$WORK/Claude切换器.app/Contents/MacOS/ClaudeSwitcher" -verify_arch x86_64
           codesign --verify --deep --strict "$WORK/Claude切换器.app"
           cd build
           shasum -a 256 \
