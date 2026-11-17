@@ -1,0 +1,81 @@
+name: Intel macOS test build
+
+on:
+  push:
+    branches:
+      - notion/intel-macos-build
+    tags:
+      - 'intel-v1.9.1-test.1'
+
+permissions:
+  contents: write
+
+jobs:
+  build-intel:
+    runs-on: macos-15-intel
+    env:
+      VERSION: '1.9.1'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify source and architecture
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          shasum -a 256 -c SHA256SUMS
+          bash -n scripts/package-macos.sh
+
+      - name: Run regression tests
+        run: python3 -B -m unittest discover -s tests -v
+
+      - name: Compile and package Intel app
+        run: |
+          set -euo pipefail
+          bash scripts/package-macos.sh "$VERSION"
+          APP='build/Claude切换器.app'
+          lipo -verify_arch x86_64 "$APP/Contents/MacOS/ClaudeSwitcher"
+          test "$(lipo -archs "$APP/Contents/MacOS/ClaudeSwitcher")" = x86_64
+          codesign --verify --deep --strict "$APP"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION"
+          hdiutil verify "build/ClaudeSwitcher-${VERSION}-macos-x86_64-app-only.dmg"
+
+      - name: Verify ZIP and generate checksums
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d)"
+          trap 'rm -rf "$WORK"' EXIT
+          ditto -x -k "build/ClaudeSwitcher-${VERSION}-macos-x86_64-app-only.zip" "$WORK"
+          lipo -verify_arch x86_64 "$WORK/Claude切换器.app/Contents/MacOS/ClaudeSwitcher"
+          codesign --verify --deep --strict "$WORK/Claude切换器.app"
+          cd build
+          shasum -a 256 \
+            "ClaudeSwitcher-${VERSION}-macos-x86_64-app-only.zip" \
+            "ClaudeSwitcher-${VERSION}-macos-x86_64-app-only.dmg" \
+            "ClaudeSwitcher-${VERSION}-installer-kit.zip" > SHA256SUMS-intel.txt
+          shasum -a 256 -c SHA256SUMS-intel.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-switcher-intel-test
+          path: |
+            build/ClaudeSwitcher-1.9.1-macos-x86_64-app-only.zip
+            build/ClaudeSwitcher-1.9.1-macos-x86_64-app-only.dmg
+            build/ClaudeSwitcher-1.9.1-installer-kit.zip
+            build/SHA256SUMS-intel.txt
+          if-no-files-found: error
+
+      - name: Publish fork prerelease
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "build/ClaudeSwitcher-${VERSION}-macos-x86_64-app-only.zip" \
+            "build/ClaudeSwitcher-${VERSION}-macos-x86_64-app-only.dmg" \
+            "build/ClaudeSwitcher-${VERSION}-installer-kit.zip" \
+            "build/SHA256SUMS-intel.txt" \
+            --prerelease \
+            --title "Intel macOS 测试版（非上游正式版）" \
+            --notes '这是个人 Fork 的 Intel x86_64 测试构建，尚未在 Intel macOS 26 真机验收。app-only 包仅包含界面；首次安装需使用 installer-kit，并需可用的 Swift 工具链。App 仅为 ad-hoc 签名，未使用 Apple Developer ID 签名或公证。请遵守上游 AGPL-3.0-only 许可。'
