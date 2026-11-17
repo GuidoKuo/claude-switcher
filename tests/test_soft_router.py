@@ -46,7 +46,7 @@ esac''',
     def test_ready_displays_limits_without_local_tun_or_daemon(self):
         p=self.run_core(['checkdetail'])
         log = self.base / "last-check.txt"
-        debug = log.read_text() if log.exists() else "no last-check file"
+        debug = log.read_text(encoding="utf-8", errors="backslashreplace") if log.exists() else "no last-check file"
         self.assertEqual(p.returncode,0,p.stdout+p.stderr+"\n"+debug)
         for item in ['代理内核=warn:', 'TUN网卡=skip:', '保镖=warn:', '规则置顶=warn:', 'WebRTC=warn:', 'DNS=warn:', 'IPv6=warn:']:
             self.assertIn(item,p.stdout)
