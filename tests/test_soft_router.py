@@ -1,5 +1,6 @@
 """Synthetic network tests. No real network, root daemon or account data used."""
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -42,6 +43,11 @@ esac''',
 
     def run_core(self, command, **env):
         return subprocess.run(['/bin/bash',str(self.core),*command],env={**self.env,**env},capture_output=True,text=True,timeout=20)
+
+    def test_non_ascii_does_not_extend_shell_variable_names(self):
+        for path in (ROOT/'core/claude-switch.sh', ROOT/'soft-router/安装.command'):
+            text=path.read_text(encoding='utf-8')
+            self.assertIsNone(re.search(r'\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]', text), str(path))
 
     def test_ready_displays_limits_without_local_tun_or_daemon(self):
         p=self.run_core(['checkdetail'])

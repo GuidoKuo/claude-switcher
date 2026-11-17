@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != x86_64 ]; then echo '此安装包仅支持 Intel macOS。'; exit 1; fi
 for cmd in python3 route ipconfig launchctl dig ditto; do
-    command -v "$cmd" >/dev/null 2>&1 || { echo "缺少 $cmd，安装已停止。python3 可能需要安装 Apple 命令行工具。"; exit 1; }
+    command -v "$cmd" >/dev/null 2>&1 || { echo "缺少 ${cmd}，安装已停止。python3 可能需要安装 Apple 命令行工具。"; exit 1; }
 done
 [ -d /Applications/Claude.app ] || { echo '请先将 Claude 安装到 /Applications。'; exit 1; }
 [ -x 'Claude切换器.app/Contents/MacOS/ClaudeSwitcher' ] && [ -f claude-switch.sh ] && [ -f stun-probe.py ] || { echo '安装包不完整'; exit 1; }
@@ -14,7 +14,7 @@ for file in "$BIN" "$BASE/router-network" "$BASE/stun-probe.py" "$BASE/current" 
     [ ! -e "$file" ] || { echo "发现已有安装或守护进程：$file"; echo '已停止，未修改文件；请先确认旧版卸载和账号备份。'; exit 1; }
 done
 for label in system/local.claude-bodyguard system/local.tz-watchdog system/local.claude-update "gui/$(id -u)/local.claude-update"; do
-    if launchctl print "$label" >/dev/null 2>&1; then echo "检测到运行中的旧服务 $label，安装已停止。"; exit 1; fi
+    if launchctl print "$label" >/dev/null 2>&1; then echo "检测到运行中的旧服务 ${label}，安装已停止。"; exit 1; fi
 done
 route_info=$(route -n get default 2>/dev/null) || { echo '读取默认路由失败'; exit 1; }
 gw=$(printf '%s\n' "$route_info" | awk '$1=="gateway:" {print $2;exit}')
@@ -22,7 +22,7 @@ iface=$(printf '%s\n' "$route_info" | awk '$1=="interface:" {print $2;exit}')
 [ -n "$gw" ] && [ -n "$iface" ] || { echo '默认路由不完整'; exit 1; }
 ip=$(ipconfig getifaddr "$iface" 2>/dev/null) || { echo '未检测到接口 IPv4 地址'; exit 1; }
 [ -n "$ip" ] || { echo '未检测到接口 IPv4 地址'; exit 1; }
-echo "检测到：网关 $gw，接口 $iface，本机 IP $ip"
+echo "检测到：网关 ${gw}，接口 ${iface}，本机 IP $ip"
 echo '安装后这些地址发生变化时将阻止切换，需要重新配置。'
 echo '警告：本版没有故障断网保护；DNS/HTTPS 检测会访问外部服务，WebRTC 未验证。'
 echo '不安装 root 守护进程，不自动改路由器、时区、地区或 IPv6。'

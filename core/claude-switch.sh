@@ -1476,9 +1476,9 @@ checkdetail() {
         optional_result "IP一致" "$ipst" "$ipdt"
     fi
     tz=$(readlink /etc/localtime 2>/dev/null)
-    if [ "$PROXY_MODE" = "router" ]; then echo "时区=warn:仅显示当前值 $tz；不自动修改"; elif [ "$tz" = "/var/db/timezone/zoneinfo/$TZ_TARGET" ]; then echo '时区=ok'; else echo "时区=fail:$tz"; fi
+    if [ "$PROXY_MODE" = "router" ]; then echo "时区=warn:仅显示当前值 ${tz}；不自动修改"; elif [ "$tz" = "/var/db/timezone/zoneinfo/$TZ_TARGET" ]; then echo '时区=ok'; else echo "时区=fail:$tz"; fi
     locale=$(defaults read -g AppleLocale 2>/dev/null)
-    if [ "$PROXY_MODE" = "router" ]; then echo "地区=warn:仅显示当前值 $locale；不自动修改"; elif [ "$locale" = "$LOCALE_TARGET" ]; then echo '地区=ok'; else echo "地区=fail:$locale"; fi
+    if [ "$PROXY_MODE" = "router" ]; then echo "地区=warn:仅显示当前值 ${locale}；不自动修改"; elif [ "$locale" = "$LOCALE_TARGET" ]; then echo '地区=ok'; else echo "地区=fail:$locale"; fi
     if [ "$PROXY_MODE" = "router" ]; then
         if router_ipv6_no_default; then echo 'IPv6=warn:未发现 IPv6 默认路由；未验证所有路径'; else echo 'IPv6=fail:发现默认路由或无法读取路由表'; fi
     else
@@ -2342,7 +2342,7 @@ run_cli() {
     for var in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN \
         CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_PROFILE; do
         if [ -n "${!var-}" ]; then
-            echo "FAIL:检测到认证环境变量 $var，无法保证账号隔离，已拒绝启动"
+            echo "FAIL:检测到认证环境变量 ${var}，无法保证账号隔离，已拒绝启动"
             return 1
         fi
     done
