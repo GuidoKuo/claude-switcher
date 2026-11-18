@@ -2,7 +2,7 @@ name: Intel soft-router test
 on:
   push:
     branches: [notion/soft-router]
-    tags: ['intel-v1.9.1-router-test.2']
+    tags: ['intel-v1.9.1-router-test.3']
 permissions:
   contents: write
 jobs:
@@ -40,28 +40,28 @@ jobs:
           cp soft-router/安装.command soft-router/卸载.command soft-router/manage.sh soft-router/说明.txt build/router-kit/
           cp core/claude-switch.sh core/stun-probe.py LICENSE build/router-kit/
           chmod +x build/router-kit/安装.command build/router-kit/卸载.command build/router-kit/manage.sh
-          ditto -c -k --keepParent --norsrc --noextattr build/router-kit build/ClaudeSwitcher-1.9.1-intel-soft-router-v2.zip
+          ditto -c -k --keepParent --norsrc --noextattr build/router-kit build/ClaudeSwitcher-1.9.1-intel-soft-router-v3.zip
           temp=$(mktemp -d); trap 'rm -rf "$temp"' EXIT
-          ditto -x -k build/ClaudeSwitcher-1.9.1-intel-soft-router-v2.zip "$temp"
+          ditto -x -k build/ClaudeSwitcher-1.9.1-intel-soft-router-v3.zip "$temp"
           test -x "$temp/router-kit/安装.command"
           test -x "$temp/router-kit/卸载.command"
           test -x "$temp/router-kit/manage.sh"
           for f in "$temp/router-kit/安装.command" "$temp/router-kit/卸载.command" "$temp/router-kit/manage.sh" "$temp/router-kit/claude-switch.sh"; do bash -n "$f"; done
           lipo "$temp/router-kit/Claude切换器.app/Contents/MacOS/ClaudeSwitcher" -verify_arch x86_64
           codesign --verify --deep --strict "$temp/router-kit/Claude切换器.app"
-          (cd build && shasum -a 256 ClaudeSwitcher-1.9.1-intel-soft-router-v2.zip > SHA256SUMS-router-v2.txt && shasum -a 256 -c SHA256SUMS-router-v2.txt)
+          (cd build && shasum -a 256 ClaudeSwitcher-1.9.1-intel-soft-router-v3.zip > SHA256SUMS-router-v3.txt && shasum -a 256 -c SHA256SUMS-router-v3.txt)
       - uses: actions/upload-artifact@v4
         with:
           name: intel-soft-router-test
           path: |
-            build/ClaudeSwitcher-1.9.1-intel-soft-router-v2.zip
-            build/SHA256SUMS-router-v2.txt
+            build/ClaudeSwitcher-1.9.1-intel-soft-router-v3.zip
+            build/SHA256SUMS-router-v3.txt
           if-no-files-found: error
       - name: Publish fork prerelease
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" \
-            build/ClaudeSwitcher-1.9.1-intel-soft-router-v2.zip build/SHA256SUMS-router-v2.txt \
-            --prerelease --title 'Intel 软路由适配测试版 v2' \
+            build/ClaudeSwitcher-1.9.1-intel-soft-router-v3.zip build/SHA256SUMS-router-v3.txt \
+            --prerelease --title 'Intel 软路由适配测试版 v3' \
             --notes '个人 fork 测试版，未在 Intel macOS 26 真机验收。无故障断网保护；提供旧版卸载备份及可选资料迁移；不安装 root 保镖，不修改路由器与系统网络配置。账号切换前的检查不保证流量不泄漏。应用为 ad-hoc 签名，未公证。源码和许可证参见此 release 对应标签。'

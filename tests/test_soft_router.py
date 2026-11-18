@@ -104,6 +104,9 @@ esac''',
     def test_dns_cname_then_fake_is_accepted(self):
         p=self.run_core(['checkdetail'],MOCK_DNS='alias.example.\n198.18.1.94')
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
+        self.assertIn('DNS=warn:',p.stdout)
+        p=self.run_core(['check'],MOCK_DNS='alias.example.\n198.18.1.94')
+        self.assertEqual(p.returncode,0,p.stdout+p.stderr)
 
     def test_dns_mixed_addresses_fails_closed(self):
         p=self.run_core(['checkdetail'],MOCK_DNS='198.18.1.94\n1.2.3.4')

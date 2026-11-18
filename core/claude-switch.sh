@@ -1089,15 +1089,18 @@ stun_ok() { merge_ok; }
 # 当前 Clash 模式(rule/global/direct);读取失败返回空
 clash_mode() { clash_rules mode 2>/dev/null; }
 
-# 置顶规则行为检测:三个生态域名全部解析到 fake-ip 段(198.18.x.x)即视为已置顶;未命中域名记入 ROUTE_MISSED
+# 所有 IPv4 应答均为 fake-IP 才算通过；CNAME 行不当作 IP。
+router_dns_fake() {
+    dig +short +time=3 +tries=1 "$1" A 2>/dev/null | awk '
+        /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ { n++; if (!first) first=$0; if ($0 !~ /^198[.]18[.]/) bad=1 }
+        END { if (n && !bad) { print first; exit 0 } else exit 1 }'
+}
+# 三个域名均需解析到 fake-IP；不代表实际流量一定走代理。
 route_ok() {
     ROUTE_MISSED=""
-    local d a
+    local d
     for d in claude.ai api.anthropic.com claudeusercontent.com; do
-        a=$(dig +short +time=3 +tries=1 "$d" A 2>/dev/null | awk '
-            /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ { n++; if ($0 !~ /^198[.]18[.]/) bad=1 }
-            END { if (n && !bad) print "fake"; else print "other" }')
-        [ "$a" = fake ] || ROUTE_MISSED="$ROUTE_MISSED $d"
+        router_dns_fake "$d" >/dev/null || ROUTE_MISSED="$ROUTE_MISSED $d"
     done
     [ -z "$ROUTE_MISSED" ]
 }
@@ -1294,11 +1297,12 @@ check() {
     fi
 
     if ! check_disabled "DNS"; then
-        dnsip=$(dig +short +time=3 +tries=1 claude.ai 2>/dev/null | head -1)
-        case "$dnsip" in
-            198.18.*) ;;
-            *) optional_failure "DNS未走隧道" ;;
-        esac
+        if [ "$PROXY_MODE" = "router" ]; then
+            router_dns_fake claude.ai >/dev/null || optional_failure "DNS未返回预期 fake-IP"
+        else
+            dnsip=$(dig +short +time=3 +tries=1 claude.ai 2>/dev/null | head -1)
+            case "$dnsip" in 198.18.*) ;; *) optional_failure "DNS未走隧道" ;; esac
+        fi
     fi
 
     if ! check_disabled "WebRTC"; then
@@ -1494,11 +1498,16 @@ checkdetail() {
     if check_disabled "DNS"; then
         optional_result "DNS" ok
     else
-        dnsip=$(dig +short +time=3 +tries=1 claude.ai 2>/dev/null | head -1)
-        case "$dnsip" in
-            198.18.*) if [ "$PROXY_MODE" = "router" ]; then optional_result "DNS" warn "返回 fake-IP；不证明 DNS 或流量防泄漏"; else optional_result "DNS" ok "走隧道"; fi ;;
-            *) optional_result "DNS" fail "未走隧道(${dnsip:-空})" ;;
-        esac
+        if [ "$PROXY_MODE" = "router" ]; then
+            if router_dns_fake claude.ai >/dev/null; then
+                optional_result "DNS" warn "返回 fake-IP；不证明 DNS 或流量防泄漏"
+            else
+                optional_result "DNS" fail "未返回预期 fake-IP 或包含其他地址"
+            fi
+        else
+            dnsip=$(dig +short +time=3 +tries=1 claude.ai 2>/dev/null | head -1)
+            case "$dnsip" in 198.18.*) optional_result "DNS" ok "走隧道" ;; *) optional_result "DNS" fail "未走隧道(${dnsip:-空})" ;; esac
+        fi
     fi
     if check_disabled "WebRTC"; then
         optional_result "WebRTC" ok
