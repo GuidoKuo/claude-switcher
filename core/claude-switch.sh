@@ -6,6 +6,10 @@ export LC_ALL=en_US.UTF-8
 
 if [ "${1:-}" = "_support" ]; then
     shift
+    # Finder 启动时 PATH 往往不包含终端里的 Python；软路由安装器记录已验证的绝对路径。
+    if [ -z "${CLAUDE_SWITCHER_PYTHON:-}" ] && [ -r "$HOME/.claude-switcher/router-python" ]; then
+        IFS= read -r CLAUDE_SWITCHER_PYTHON < "$HOME/.claude-switcher/router-python" || true
+    fi
     exec "${CLAUDE_SWITCHER_PYTHON:-python3}" - "$@" <<'PY_SUPPORT'
 import datetime
 import json
@@ -943,7 +947,10 @@ CHECKS_DISABLED=""
 ALLOW_OPTIONAL_FAILURES=0
 load_check_config() {
     local config key value
-    config=$("$0" _support config 2>/dev/null) || return 1
+    config=$("$0" _support config 2>/dev/null) || {
+        echo '检查配置或 Python 运行失败：请重新运行软路由安装器，确认 Python 3 可用' >&2
+        return 1
+    }
     while IFS='=' read -r key value; do
         case "$key" in
             disabled) CHECKS_DISABLED="$value" ;;
@@ -1087,11 +1094,10 @@ route_ok() {
     ROUTE_MISSED=""
     local d a
     for d in claude.ai api.anthropic.com claudeusercontent.com; do
-        a=$(dig +short +time=3 +tries=1 "$d" 2>/dev/null | head -1)
-        case "$a" in
-            198.18.*) ;;
-            *) ROUTE_MISSED="$ROUTE_MISSED $d" ;;
-        esac
+        a=$(dig +short +time=3 +tries=1 "$d" A 2>/dev/null | awk '
+            /^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$/ { n++; if ($0 !~ /^198[.]18[.]/) bad=1 }
+            END { if (n && !bad) print "fake"; else print "other" }')
+        [ "$a" = fake ] || ROUTE_MISSED="$ROUTE_MISSED $d"
     done
     [ -z "$ROUTE_MISSED" ]
 }
@@ -1252,7 +1258,7 @@ check() {
     fi
 
     if [ "$PROXY_MODE" = "router" ]; then
-        trace=$(curl -4 --noproxy "*" -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+        trace=$(curl -4 --noproxy "*" -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | tr -d "\r")
     else
         trace=$(curl -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
     fi
@@ -1447,7 +1453,7 @@ checkdetail() {
         if tun_up; then echo 'TUN网卡=ok'; else echo 'TUN网卡=fail:不在线'; fi
     fi
     if [ "$PROXY_MODE" = "router" ]; then
-        trace=$(curl -4 --noproxy "*" -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+        trace=$(curl -4 --noproxy "*" -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | tr -d "\r")
     else
         trace=$(curl -s --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
     fi

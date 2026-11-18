@@ -41,12 +41,18 @@ bootout) [ "${FAIL_STOP:-}" != 1 ] || exit 1; rm -f "$f";; esac''',
     def test_migrate_preserves_and_replaces(self):
         self.old(); p=self.run_kit('安装.command','1\nSG\nYES\n\n'); self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         base=self.home/'.claude-switcher'; self.assertEqual((base/'accounts/A/session').read_text(),'PRIVATE'); self.assertEqual((base/'keep-stage/pending').read_text(),'PENDING')
-        self.assertEqual((base/'cli-accounts/B/token').read_text(),'CLI'); self.assertIn('COUNTRY_TARGET="SG"',(self.home/'.local/bin/claude-switch.sh').read_text())
+        self.assertEqual((base/'cli-accounts/B/token').read_text(),'CLI'); self.assertTrue((base/'router-python').read_text().strip().endswith('python3')); self.assertIn('COUNTRY_TARGET="SG"',(self.home/'.local/bin/claude-switch.sh').read_text())
         self.assertFalse((self.sys/'Library/LaunchDaemons/local.claude-bodyguard.plist').exists()); self.assertFalse((self.home/'services/system_local.claude-bodyguard').exists())
         b=list((self.home/'.claude-switcher-backups').glob('old.*')); self.assertEqual(len(b),1); self.assertEqual((b[0]/'user/.claude-switcher/accounts/A/session').read_text(),'PRIVATE')
     def test_fresh_keeps_backup_not_active(self):
         self.old(); p=self.run_kit('安装.command','2\nUS\nYES\n\n'); self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         self.assertFalse((self.home/'.claude-switcher/accounts/A/session').exists()); self.assertTrue(list((self.home/'.claude-switcher-backups').glob('old.*/user/.claude-switcher/accounts/A/session')))
+    def test_broken_python_does_not_touch_old_install(self):
+        self.old(); f=self.bin/'python3'; f.write_text('#!/bin/sh\nexit 1\n'); f.chmod(0o755)
+        p=self.run_kit('安装.command','1\nUS\nYES\n')
+        self.assertNotEqual(p.returncode,0); self.assertIn('Python 3 无法运行',p.stdout)
+        self.assertEqual((self.home/'.local/bin/claude-switch.sh').read_text(),'OLD')
+        self.assertTrue((self.home/'services/system_local.claude-bodyguard').exists())
     def test_cancel_changes_nothing(self):
         self.old(); p=self.run_kit('安装.command','3\n'); self.assertNotEqual(p.returncode,0); self.assertEqual((self.home/'.local/bin/claude-switch.sh').read_text(),'OLD'); self.assertTrue((self.home/'services/system_local.claude-bodyguard').exists())
     def test_failed_service_stop_prevents_moves(self):

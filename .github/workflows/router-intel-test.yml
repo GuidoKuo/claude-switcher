@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: macos-15-intel
+    runs-on: macos-26-intel
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}

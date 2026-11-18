@@ -1,7 +1,7 @@
 Claude 切换器 Intel macOS 软路由测试版 v2（个人 fork，非上游正式版）
 仅供 Intel x86_64 macOS。未在用户的 macOS 26 真机验收，应用仅 ad-hoc 签名，未经 Apple 公证。
 
-双击“安装.command”。请先退出旧版切换器。需要 /Applications/Claude.app 和可运行的 python3。
+双击“安装.command”。请先退出旧版切换器。需要 /Applications/Claude.app 和可运行的 python3。安装器会记录可用 Python 的路径，供 Finder 启动的应用使用。
 安装程序先确认网关、网卡、本机 IPv4，并让你选择迁移资料或全新安装。
 迁移从当前 ~/.claude-switcher 复制账号存档、当前账号、CLI账号、保留路径和中断暂存；旧的独立备份不会自动搜索或迁移。
 无论是否迁移，旧入口、启动配置和当前旧切换器资料会移到 ~/.claude-switcher-backups/，可能含登录态，请妥善保管。

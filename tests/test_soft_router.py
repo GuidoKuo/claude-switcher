@@ -101,6 +101,31 @@ esac''',
         self.assertIn('IPv6',p.stdout)
         self.assertFalse((self.home/'curl-was-called').exists())
 
+    def test_dns_cname_then_fake_is_accepted(self):
+        p=self.run_core(['checkdetail'],MOCK_DNS='alias.example.\n198.18.1.94')
+        self.assertEqual(p.returncode,0,p.stdout+p.stderr)
+
+    def test_dns_mixed_addresses_fails_closed(self):
+        p=self.run_core(['checkdetail'],MOCK_DNS='198.18.1.94\n1.2.3.4')
+        self.assertNotEqual(p.returncode,0)
+        self.assertIn('claude.ai', p.stdout)
+        self.assertFalse((self.home/'curl-was-called').exists())
+
+    def test_installed_python_works_even_when_gui_path_lacks_python(self):
+        import sys
+        (self.base/'router-python').write_text(sys.executable+'\n')
+        bad=self.bin/'python3'; bad.write_text('#!/bin/sh\nexit 99\n'); bad.chmod(0o755)
+        p=self.run_core(['_support','config'])
+        self.assertEqual(p.returncode,0,p.stdout+p.stderr)
+        self.assertIn('disabled=',p.stdout)
+
+    def test_python_error_explains_failure(self):
+        (self.base/'router-python').write_text('/nonexistent/python3\n')
+        p=self.run_core(['checkdetail'])
+        self.assertNotEqual(p.returncode,0)
+        self.assertIn('Python',p.stdout)
+        self.assertFalse((self.home/'curl-was-called').exists())
+
     def test_non_fake_dns_blocks_before_http(self):
         p=self.run_core(['checkdetail'],MOCK_DNS='1.2.3.4')
         self.assertNotEqual(p.returncode,0)
